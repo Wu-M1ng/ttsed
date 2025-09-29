@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>🎙️ TTS 服务终极测试页面 (v3.0 - EdgeOne Pages版)</title>
+  <title>🎙️ TTS 服务终极测试页面 (v4.0 - 带登录)</title>
   <style>
     :root {
       --primary-color: #4f46e5;
@@ -48,9 +48,14 @@
     .app-container {
       display: flex;
       justify-content: center;
-      align-items: flex-start;
+      align-items: center; /* 垂直居中登录框 */
       min-height: 100vh;
       padding: 2rem 0 2rem;
+    }
+    
+    /* 让主内容区恢复顶部对齐 */
+    .app-container.authenticated {
+        align-items: flex-start;
     }
 
     .container {
@@ -64,6 +69,24 @@
       border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
+    /* 新增：登录界面样式 */
+    .login-container {
+      max-width: 400px;
+      padding: 2rem;
+    }
+
+    .login-box h2 {
+        text-align: center;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+
+    .login-box p {
+        text-align: center;
+        margin-bottom: 2rem;
+        color: var(--gray);
+    }
+    
     h1 {
       text-align: center;
       color: var(--text-color);
@@ -489,20 +512,39 @@
 </head>
 
 <body>
-  <div id="app" class="app-container">
-    <main class="container">
+  <div id="app" class="app-container" :class="{ authenticated: isAuthenticated }">
+
+    <!-- 新增：登录界面 -->
+    <div v-if="!isAuthenticated" class="login-container container">
+        <div class="login-box">
+            <h2>身份验证</h2>
+            <p>请输入您的 API Key 以继续使用服务。</p>
+            <div class="form-group">
+                <label for="loginApiKey">API_KEY</label>
+                <input type="password" id="loginApiKey" v-model="tempApiKey" @keyup.enter="login" placeholder="在此输入您的 API Key">
+            </div>
+            <button @click="login" class="btn-generate" style="width: 100%;">授权并进入</button>
+            <div v-if="loginError" class="status status-error show" style="margin-top: 1rem;">
+                {{ loginError }}
+            </div>
+        </div>
+    </div>
+
+    <!-- 主应用界面 -->
+    <main v-if="isAuthenticated" class="container">
       <h1 v-cloak>{{ title }}</h1>
 
       <details>
-        <summary>API 配置</summary>
+        <summary>API 配置与退出</summary>
         <div class="form-group" style="margin-top: 1rem">
           <label for="baseUrl">API Base URL</label>
           <input type="text" id="baseUrl" v-model="config.baseUrl" @input="saveConfig" placeholder="https://你的域名" />
         </div>
         <div class="form-group" style="margin-bottom: 0">
-          <label for="apiKey">API Key</label>
-          <input type="password" id="apiKey" v-model="config.apiKey" @input="saveConfig" placeholder="hello" />
+          <label for="apiKey">当前 API Key (只读)</label>
+          <input type="password" id="apiKey" :value="config.apiKey" readonly />
         </div>
+        <button @click="logout()" class="btn-generate" style="background: var(--error-color); width: 100%; margin-top: 1rem;">退出登录</button>
       </details>
 
       <div class="form-group">
@@ -667,16 +709,21 @@
     createApp({
       data() {
         return {
-          title: 'TTS 服务终极测试页面 (v3.0 - EdgeOne Pages版)',
+          // 新增：认证状态
+          isAuthenticated: false,
+          tempApiKey: '',
+          loginError: '',
+
+          title: 'TTS 服务终极测试页面 (v4.0 - 带登录)',
           isLoading: false,
           isStreaming: false,
           audioSrc: '',
-          downloadUrl: '', // 添加下载链接
-          showDownloadBtn: false, // 控制下载按钮显示
-          pauseTime: 1.0, // 停顿时间
+          downloadUrl: '',
+          showDownloadBtn: false,
+          pauseTime: 1.0,
           config: {
             baseUrl: window.location.origin,
-            apiKey: 'hello'
+            apiKey: '' // 初始为空
           },
           form: {
             inputText: '请在这里输入文本，目前尽可能不要超过1点5万字每次，不然会报错。音色映射可以自行修改EdgeOne函数的配置',
@@ -711,17 +758,49 @@
         }
       },
       methods: {
+        // 新增：登录方法
+        login() {
+            if (!this.tempApiKey.trim()) {
+                this.loginError = 'API Key 不能为空';
+                return;
+            }
+            this.config.apiKey = this.tempApiKey.trim();
+            this.saveConfig();
+            this.isAuthenticated = true;
+            this.loginError = '';
+        },
+        // 新增：退出登录方法
+        logout(message = '') {
+            this.isAuthenticated = false;
+            this.config.apiKey = '';
+            this.tempApiKey = '';
+            // 清除本地存储的配置
+            try {
+                localStorage.removeItem('tts_config');
+            } catch (e) {
+                console.warn('Failed to remove config from localStorage:', e);
+            }
+            if (message) {
+                this.loginError = message;
+            }
+        },
         loadConfig() {
           try {
             const saved = localStorage.getItem('tts_config');
             if (saved) {
-              this.config = { ...this.config, ...JSON.parse(saved) };
-              if (this.config.baseUrl.endsWith('/')) {
-                this.config.baseUrl = this.config.baseUrl.slice(0, -1); // 去除末尾的斜杠
+              const parsedConfig = JSON.parse(saved);
+              // 检查是否存在有效的apiKey
+              if (parsedConfig.apiKey) {
+                  this.config = { ...this.config, ...parsedConfig };
+                  if (this.config.baseUrl.endsWith('/')) {
+                    this.config.baseUrl = this.config.baseUrl.slice(0, -1);
+                  }
+                  this.isAuthenticated = true; // 存在Key，直接认证
               }
             }
           } catch (e) {
             console.warn('Failed to load config from localStorage:', e);
+            localStorage.removeItem('tts_config'); // 如果解析失败，清除损坏的数据
           }
         },
         saveConfig() {
@@ -790,21 +869,19 @@
           };
         },
         async generateSpeech(isStream) {
-          const baseUrl = this.config.baseUrl.trim(); // 去除末尾的斜杠
+          const baseUrl = this.config.baseUrl.trim();
           const apiKey = this.config.apiKey.trim();
           const text = this.form.inputText.trim();
 
           if (!baseUrl || !apiKey || !text) {
-            this.updateStatus('请填写 API 配置和输入文本', 'error');
+            this.updateStatus('请检查 API Base URL 是否设置，并确保已输入文本', 'error');
             return;
           }
 
-          // 验证 API Key 是否包含非 ASCII 字符
           try {
-            // 测试 API Key 是否可以安全地用于 HTTP 头
             new Headers({ 'Authorization': 'Bearer ' + apiKey });
           } catch (e) {
-            this.updateStatus('API Key 包含无效字符，请使用纯英文数字和符号', 'error');
+            this.logout('API Key 包含无效字符，请重新输入');
             return;
           }
 
@@ -814,26 +891,41 @@
           this.isLoading = true;
           this.isStreaming = isStream;
           this.audioSrc = '';
-          this.showDownloadBtn = false; // 重置下载按钮状态
+          this.showDownloadBtn = false;
           if (this.downloadUrl) {
-            URL.revokeObjectURL(this.downloadUrl); // 清理之前的下载链接
+            URL.revokeObjectURL(this.downloadUrl);
             this.downloadUrl = '';
           }
           this.updateStatus('正在连接服务器...', 'info');
 
           try {
-            if (isStream) {
-              await this.playStreamWithMSE(baseUrl, apiKey, requestBody);
-            } else {
-              await this.playStandard(baseUrl, apiKey, requestBody);
-            }
+            const apiCall = isStream 
+                ? this.playStreamWithMSE(baseUrl, apiKey, requestBody)
+                : this.playStandard(baseUrl, apiKey, requestBody);
+            await apiCall;
           } catch (error) {
-            console.error('Error generating speech:', error);
-            this.updateStatus('错误: ' + error.message, 'error');
+            // 错误处理已在各自的方法中实现，这里只捕获未处理的异常
+            if (!this.status.show) { // 如果状态没有被特殊处理（如401），则显示通用错误
+                console.error('Error generating speech:', error);
+                this.updateStatus('错误: ' + error.message, 'error');
+            }
           } finally {
             this.isLoading = false;
             this.isStreaming = false;
           }
+        },
+        async handleFetchError(response) {
+            // 关键：处理401错误
+            if (response.status === 401) {
+                this.logout('API Key 已过期或无效，请重新登录。');
+                throw new Error('身份验证失败 (401)');
+            }
+
+            const errorData = await response.json().catch(() => ({})); // 防止json解析失败
+            throw new Error(
+                errorData.error?.message ||
+                'HTTP 错误! 状态码: ' + response.status
+            );
         },
         async playStandard(baseUrl, apiKey, body) {
           const response = await fetch(baseUrl + '/api/v1/audio/speech', {
@@ -846,20 +938,15 @@
           });
 
           if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(
-              errorData.error?.message ||
-              'HTTP error! status: ' + response.status
-            );
+            await this.handleFetchError(response);
           }
 
           const blob = await response.blob();
           this.audioSrc = URL.createObjectURL(blob);
-          this.downloadUrl = this.audioSrc; // 非流式模式直接使用相同的URL
+          this.downloadUrl = this.audioSrc;
           this.showDownloadBtn = true;
           this.updateStatus('播放中...', 'success');
 
-          // 自动播放
           this.$nextTick(() => {
             this.$refs.audioPlayer.play().catch(e =>
               console.warn('Autoplay was prevented:', e)
@@ -869,8 +956,6 @@
         async playStreamWithMSE(baseUrl, apiKey, body) {
           const mediaSource = new MediaSource();
           this.audioSrc = URL.createObjectURL(mediaSource);
-
-          // 用于收集音频数据的数组
           const audioChunks = [];
 
           return new Promise((resolve, reject) => {
@@ -889,16 +974,11 @@
                 });
 
                 if (!response.ok) {
-                  const errorData = await response.json();
-                  throw new Error(
-                    errorData.error?.message ||
-                    'HTTP error! status: ' + response.status
-                  );
+                    await this.handleFetchError(response);
                 }
 
                 this.updateStatus('已连接，接收数据中...', 'info');
 
-                // 自动播放
                 this.$nextTick(() => {
                   this.$refs.audioPlayer.play().catch(e =>
                     console.warn('Autoplay was prevented:', e)
@@ -906,47 +986,45 @@
                 });
 
                 const reader = response.body.getReader();
-
                 const pump = async () => {
-                  const { done, value } = await reader.read();
-
-                  if (done) {
-                    if (mediaSource.readyState === 'open' && !sourceBuffer.updating) {
-                      mediaSource.endOfStream();
+                  try {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                      if (mediaSource.readyState === 'open' && !sourceBuffer.updating) {
+                        mediaSource.endOfStream();
+                      }
+                      const completeAudioBlob = new Blob(audioChunks, { type: 'audio/mpeg' });
+                      this.downloadUrl = URL.createObjectURL(completeAudioBlob);
+                      this.showDownloadBtn = true;
+                      this.updateStatus('播放完毕！可点击下载按钮保存音频', 'success');
+                      resolve();
+                      return;
                     }
-
-                    // 创建完整的音频文件用于下载
-                    const completeAudioBlob = new Blob(audioChunks, { type: 'audio/mpeg' });
-                    this.downloadUrl = URL.createObjectURL(completeAudioBlob);
-                    this.showDownloadBtn = true;
-
-                    this.updateStatus('播放完毕！可点击下载按钮保存音频', 'success');
-                    resolve();
-                    return;
+                    audioChunks.push(value.slice());
+                    if (sourceBuffer.updating) {
+                      await new Promise(r => sourceBuffer.addEventListener('updateend', r, { once: true }));
+                    }
+                    sourceBuffer.appendBuffer(value);
+                    this.updateStatus('正在流式播放...', 'success');
+                  } catch(error) {
+                      // Reader.read() 可能会在连接中断时抛出错误
+                      reject(error);
                   }
-
-                  // 收集音频数据块
-                  audioChunks.push(value.slice()); // 使用slice()创建副本
-
-                  if (sourceBuffer.updating) {
-                    await new Promise(resolve =>
-                      sourceBuffer.addEventListener('updateend', resolve, { once: true })
-                    );
-                  }
-
-                  sourceBuffer.appendBuffer(value);
-                  this.updateStatus('正在流式播放...', 'success');
                 };
 
-                sourceBuffer.addEventListener('updateend', pump);
+                sourceBuffer.addEventListener('updateend', pump, { once: false });
                 await pump();
+
               } catch (error) {
                 console.error('Error in MSE streaming:', error);
-                this.updateStatus('错误: ' + error.message, 'error');
+                
+                // 只有在不是因为401被动登出时才更新状态
+                if (this.isAuthenticated) {
+                    this.updateStatus('流式传输错误: ' + error.message, 'error');
+                }
+
                 if (mediaSource.readyState === 'open') {
-                  try {
-                    mediaSource.endOfStream();
-                  } catch (e) { }
+                  try { mediaSource.endOfStream(); } catch (e) {}
                 }
                 reject(error);
               }
@@ -959,7 +1037,6 @@
         onAudioCanPlay() {
           console.log('Audio can play');
         },
-        // 插入停顿标签
         insertPause() {
           const textarea = this.$refs.textareaRef;
           if (!textarea) return;
@@ -967,18 +1044,13 @@
             window.alert('停顿时间必须在 0.01 到 100 秒之间', 'error');
             return;
           }
-
           const start = textarea.selectionStart;
           const end = textarea.selectionEnd;
           const breakTag = '<break time="' + this.pauseTime + 's"/>';
-
           const newText = this.form.inputText.slice(0, start) +
             breakTag +
             this.form.inputText.slice(end);
-
           this.form.inputText = newText;
-
-          // 保持光标位置
           this.$nextTick(() => {
             const newPos = start + breakTag.length;
             textarea.focus();
@@ -989,9 +1061,16 @@
       mounted() {
         this.loadConfig();
         this.loadForm();
+        // 检查 sessionStorage 是否有登录错误信息
+        try {
+            const loginError = sessionStorage.getItem('login_error');
+            if (loginError) {
+                this.loginError = loginError;
+                sessionStorage.removeItem('login_error');
+            }
+        } catch(e) {}
       },
       beforeUnmount() {
-        // 清理URL对象，避免内存泄漏
         if (this.audioSrc) {
           URL.revokeObjectURL(this.audioSrc);
         }
